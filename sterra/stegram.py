@@ -1,7 +1,7 @@
 from re import findall
 from tqdm import tqdm
 from time import sleep
-import requests
+import requests, requests.exceptions
 from random import randint, choice
 from aiohttp import ClientSession
 from datetime import datetime
@@ -20,17 +20,30 @@ global _
 _ = None
 
 def _check_request_passed(**kwargs) -> requests.Response:
-    url = kwargs.get("url")
-    req = requests.get(**kwargs)
-    final_url = req.history[-1].url if len(req.history) > 1 else req.url
-    if final_url == url:
+    """Makes a request and robustly checks for redirects or errors."""
+    original_url = kwargs.get("url")
+    try:
+        req = requests.get(**kwargs, timeout=15)
+        
+        # Check for redirects to the login page first
+        if "accounts/login" in req.url:
+            _.r(LoginError("Invalid or expired SessionId. Redirected to login page."))
+            return None # Should not be reached
+
+        # Now, check for any HTTP errors (like 429 Rate Limit)
+        req.raise_for_status()
+
+        # If we're here, the request was successful (2xx status)
         return req
 
-    elif final_url.startswith("https://www.instagram.com/accounts/login/"):
-        _.r(LoginError("Invalid SessionId (_check_request_passed found /accounts/login redirect)"))
-    
-    else:
-        _.r(RateLimitError(f"Unknown redirect: {final_url}"))
+    except requests.exceptions.HTTPError as e:
+        # This will catch 429 Rate Limit errors and other 4xx/5xx responses
+        _.r(RateLimitError(f"HTTP Error during request: {e}"), cont=True)
+        return None # Should not be reached
+    except requests.exceptions.RequestException as e:
+        # This will catch timeouts, connection errors, etc.
+        _.r(RateLimitError(f"A network error occurred: {e}"), cont=True)
+        return None # Should not be reached
 
 def _credToSessID(creds:list) -> tuple:
     """Returns the sessionid of the credential given"""
@@ -128,13 +141,25 @@ class _instagram:
         self.username = username
         
         # O endpoint /channel/?__a=1 parece ter sido descontinuado. Usando web_profile_info que é mais estável.
-        __a1 = _check_request_passed(
-            url = f'https://i.instagram.com/api/v1/users/web_profile_info/?username={username}',
-            cookies = self.cookies,
-            headers = {'User-Agent':USER_AGENT, 'X-IG-App-ID': '936619743392459'}
-        )
+        __a1 = None
+        max_retries = 3
+        for attempt in range(max_retries):
+            __a1 = _check_request_passed(
+                url = f'https://i.instagram.com/api/v1/users/web_profile_info/?username={username}',
+                cookies = self.cookies,
+                headers = {'User-Agent':USER_AGENT, 'X-IG-App-ID': '936619743392459'}
+            )
+            if __a1:
+                break # Success, exit the loop
+            
+            if attempt < max_retries - 1:
+                wait_time = 30 * (attempt + 1) # Wait 30s, then 60s
+                _.p(f"Initial profile fetch failed. Retrying in {wait_time} seconds... ({attempt + 1}/{max_retries})", logo="i")
+                sleep(wait_time)
+
         if not __a1:
-            raise RateLimitError("__a1 line 123 is None")
+            _.r(RateLimitError("Failed to fetch initial profile info after multiple retries. Please wait longer or change account."))
+
         st = __a1.status_code
         if st != 200:
             _.r((UserNotFoundError("username" if kwargs.get("username") else "id") if st == 404 else RateLimitError))
