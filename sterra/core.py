@@ -161,8 +161,15 @@ def ANALYSE(**kwargs) -> bool:
 
 def CONVERT(**kwargs) -> bool:
     infoList = reader(_, kwargs["fi"])()
-    infos =  exman(_)._decompose_path(kwargs["fi"])
-    name = kwargs["name"] if kwargs.get("name") else infos["name"]
+    if not infoList:
+        _.r(EmptyResultError())
+
+    name = kwargs.get("name")
+    if not name:
+        # Fallback to the original filename if no custom name is provided
+        from os.path import basename, splitext
+        name = splitext(basename(kwargs["fi"]))[0]
+
     fid, file_path = exman(_).custom_name(name=name, Format=kwargs["format"], path=kwargs["path"])
     exporter(_=_, List=infoList, file_path=file_path, Format=kwargs["format"])()
     _.p(f"""Converted file exported under id: {str(bold(fid))}""", logo=kwargs["format"])

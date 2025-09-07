@@ -3,6 +3,7 @@ from openpyxl import Workbook, load_workbook
 from re import findall
 from datetime import datetime, date
 
+import csv
 from sterra._sterrage_ import DAY_STRF, HOUR_STRF
 from sterra.exterra import exman
 
@@ -53,11 +54,15 @@ class exporter:
         excelfile.save(self.file_path)
 
     def CSV(self) -> open:
-        with open(self.file_path,"w") as w:
-            w.write(','.join(self.dict_keys)+'\n'+"\n".join([",".join([str(v).replace('\n','</b>').replace(',','</c>') for v in d.values()]) for d in self.list]))
+        """Writes data to a CSV file using the standard csv library for robustness."""
+        # The custom replacement logic is problematic. Using the csv module is safer.
+        with open(self.file_path, "w", encoding="utf-8", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=self.dict_keys)
+            writer.writeheader()
+            writer.writerows(self.list)
 
     def JSON(self) -> open:
-        open(self.file_path,"w").write(dumps(self.list,indent=4))
+        open(self.file_path, "w", encoding="utf-8").write(dumps(self.list, indent=4))
 
 class reader:
     def __init__(self, _:object, file_path:str) -> None:
@@ -90,13 +95,16 @@ class reader:
         return rtr
 
     def CSV(self) -> list:
-        with open(self.file_path,"r") as r:
-            lines = r.read().split("\n")
-            keys = lines[0].split(",")
-            rtr = [{keys[n]:v.replace('</b>','\n').replace('</c>',',') for n, v in enumerate(preDict.split(","))} for preDict in lines[1:]]
-        return rtr
+        """Reads data from a CSV file using the standard csv library."""
+        # This approach is more robust than manual splitting.
+        # It correctly handles quoted fields containing commas or newlines.
+        data = []
+        with open(self.file_path, "r", encoding="utf-8", newline="") as f:
+            reader = csv.DictReader(f)
+            data.extend(reader)
+        return data
 
     def JSON(self) -> list:
-        return loads(open(self.file_path,"r").read())
+        return loads(open(self.file_path, "r", encoding="utf-8").read())
 
 # Remplir la case "containg" quand on fait une conversion
