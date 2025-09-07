@@ -127,20 +127,21 @@ class _instagram:
                 _.r((UserNotFoundError("username" if kwargs.get("username") else "id") if username is None else RateLimitError))
         self.username = username
         
+        # O endpoint /channel/?__a=1 parece ter sido descontinuado. Usando web_profile_info que é mais estável.
         __a1 = _check_request_passed(
-            url = f'https://www.instagram.com/{username}/channel/?__a=1&__d=dis',
+            url = f'https://i.instagram.com/api/v1/users/web_profile_info/?username={username}',
             cookies = self.cookies,
-            headers = {'User-Agent':USER_AGENT}
+            headers = {'User-Agent':USER_AGENT, 'X-IG-App-ID': '936619743392459'}
         )
         if not __a1:
             raise RateLimitError("__a1 line 123 is None")
         st = __a1.status_code
         if st != 200:
             _.r((UserNotFoundError("username" if kwargs.get("username") else "id") if st == 404 else RateLimitError))
-        j = __a1.json()
+        j = __a1.json()["data"]
         if not j:
             _.r(UserNotFoundError("username" if kwargs.get("username") else "id"))
-        j = j['graphql']['user']
+        j = j['user']
         self.acc_infos = {'id': j['id'], 'followers': j['edge_followed_by']['count'], 'following': j['edge_follow']['count']}
         self.target_ig_id = self.acc_infos["id"]
 
