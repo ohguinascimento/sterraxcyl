@@ -42,7 +42,11 @@ def _check_request_passed(**kwargs) -> requests.Response:
         return None # Should not be reached
     except requests.exceptions.RequestException as e:
         # This will catch timeouts, connection errors, etc.
-        _.r(RateLimitError(f"A network error occurred: {e}"), cont=True)
+        # A redirect loop is a clear sign of an invalid session.
+        if isinstance(e, requests.exceptions.TooManyRedirects):
+            _.r(LoginError(f"Invalid or expired SessionId. The request was redirected too many times."), cont=True)
+        else:
+            _.r(RateLimitError(f"A network error occurred: {e}"), cont=True)
         return None # Should not be reached
 
 def _credToSessID(creds:list) -> tuple:
@@ -76,17 +80,19 @@ def _credToSessID(creds:list) -> tuple:
     postResp = session.post("https://www.instagram.com/accounts/login/ajax/", data=data, allow_redirects=True)
     response_data = postResp.json()
 
-    if "two_factor_required" in response_data:
+    if response_data.get("authenticated"):
+        # Success case, do nothing and proceed to return the sessionid.
+        pass
+    elif "two_factor_required" in response_data:
         _.r(LoginError("Disable 2-factor authentication to login."))
-    if "message" in response_data and response_data["message"] == "checkpoint_required":
+    elif response_data.get("message") == "checkpoint_required":
         _.r(LoginError("Check Instagram app for a security confirmation."))
-    try:
-        if not response_data["authenticated"]:
-            _.r(LoginError("Invalid credentials."))
-    except KeyError:
-        if response_data["spam"]:
-            _.r(RateLimitError())
+    elif response_data.get("spam"):
+        _.r(RateLimitError())
+    elif response_data.get("authenticated") is False:
+        _.r(LoginError("Invalid credentials."))
     else:
+        # This is the catch-all for unknown responses.
         _.p(dumps(response_data,indent=4))
         _.r(LoginError("Unknown error. Please report the upper dictionnary to the issue section of Sterra."))
 
@@ -220,9 +226,10 @@ class _instagram:
             headers=self.default_h,
             cookies=c
         )
-        if not r or r.status_code != 200:
-            _.r(LoginError("Invalid sessid"))
-        # if status.history[-1].url.startswith("https://www.instagram.com/accounts/login/") or status.status_code != 200:
+        # If 'r' is None, an error was already printed by _check_request_passed.
+        # We just need to exit gracefully to prevent a second error message.
+        if not r:
+            exit()
 
     def _verifyPrivAccAccess(self, __a1: dict) -> None:
         """Works only if account has posts"""
